@@ -1,0 +1,302 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEON SNAKE</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;display:flex;align-items:center;
+  justify-content:center;background:#070b14;color:#fff;
+  font-family:Arial,sans-serif;padding:16px
+}
+.app{width:min(600px,100%);text-align:center}
+h1{letter-spacing:4px;font-size:35px}
+h1 span{color:#35f2a1}
+.stats{display:flex;justify-content:space-around;margin:15px 0}
+.stat{background:#111d2d;padding:12px;border-radius:12px;flex:1;margin:4px}
+.stat small{display:block;color:#9eb1c9;margin-bottom:6px}
+.stat strong{font-size:23px;color:#35f2a1}
+.board{position:relative;background:#080f1a;border:2px solid #263d52;border-radius:14px;overflow:hidden}
+canvas{display:block;width:100%;height:auto;touch-action:none}
+.overlay{position:absolute;inset:0;background:#050b14dd;display:flex;align-items:center;justify-content:center;padding:20px}
+.overlay.hidden{display:none}
+button{border:0;border-radius:10px;padding:12px 20px;font-weight:bold;cursor:pointer;margin:5px}
+.primary{background:#35f2a1;color:#062017}
+.secondary{background:#17263a;color:white;border:1px solid #30435c}
+.controls{margin-top:14px;color:#9eb1c9;font-size:13px}
+.pad{display:none;grid-template-columns:repeat(3,55px);gap:5px;justify-content:center;margin-top:15px}
+.pad button{margin:0;font-size:20px;background:#17263a;color:white}
+@media(max-width:600px){.pad{display:grid}h1{font-size:28px}}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>NEON <span>SNAKE</span></h1>
+<div class="stats">
+  <div class="stat"><small>النقاط</small><strong id="score">0</strong></div>
+  <div class="stat"><small>أفضل نتيجة</small><strong id="best">0</strong></div>
+  <div class="stat"><small>المستوى</small><strong id="level">1</strong></div>
+</div>
+
+<div class="board">
+<canvas id="game" width="600" height="600"></canvas>
+<div class="overlay" id="overlay">
+  <div>
+    <h2 id="title">🐍 NEON SNAKE</h2>
+    <p id="message">اجمع الطعام وتجنب الاصطدام!</p>
+    <button class="primary" id="start">ابدأ اللعب ▶</button>
+  </div>
+</div>
+</div>
+
+<div>
+<button class="secondary" id="pause">⏸ إيقاف مؤقت</button>
+<button class="secondary" id="restart">↻ إعادة اللعب</button>
+</div>
+
+<div class="pad">
+  <span></span><button data-dir="up">▲</button><span></span>
+  <button data-dir="left">◀</button>
+  <button data-dir="down">▼</button>
+  <button data-dir="right">▶</button>
+</div>
+<div class="controls">التحكم بالأسهم أو WASD — المسافة للإيقاف</div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const size=24, cell=600/size;
+const $=id=>document.getElementById(id);
+
+let snake,food,dir,next,score,level,best=0;
+let running=false,paused=false,gameOver=false;
+let timer,last=0,acc=0;
+
+try{best=Number(localStorage.getItem("snakeBest"))||0}catch{}
+$("best").textContent=best;
+
+function reset(){
+  snake=[
+    {x:12,y:12},{x:11,y:12},
+    {x:10,y:12},{x:9,y:12}
+  ];
+  dir={x:1,y:0};next={x:1,y:0};
+  score=0;level=1;gameOver=false;paused=false;
+  spawnFood();updateStats();draw();
+}
+
+function spawnFood(){
+  do{
+    food={x:Math.floor(Math.random()*size),
+          y:Math.floor(Math.random()*size)};
+  }while(snake.some(p=>p.x===food.x&&p.y===food.y));
+}
+
+function updateStats(){
+  $("score").textContent=score;
+  $("level").textContent=level;
+  $("best").textContent=best;
+}
+
+function overlay(title,message,button){
+  $("title").textContent=title;
+  $("message").textContent=message;
+  $("start").textContent=button;
+  $("overlay").classList.remove("hidden");
+}
+
+function startGame(){
+  if(gameOver)reset();
+  running=true;paused=false;
+  $("overlay").classList.add("hidden");
+  last=performance.now();acc=0;
+  cancelAnimationFrame(timer);
+  timer=requestAnimationFrame(frame);
+}
+
+function setDirection(name){
+  const dirs={
+    up:{x:0,y:-1},down:{x:0,y:1},
+    left:{x:-1,y:0},right:{x:1,y:0}
+  };
+  const d=dirs[name];
+  if(!d)return;
+  if(d.x===-dir.x&&d.y===-dir.y)return;
+  next=d;
+}
+
+function step(){
+  dir=next;
+  const head={
+    x:snake[0].x+dir.x,
+    y:snake[0].y+dir.y
+  };
+
+  if(head.x<0||head.y<0||
+     head.x>=size||head.y>=size){
+    endGame();return;
+  }
+
+  const eating=head.x===food.x&&head.y===food.y;
+  const body=eating?snake:snake.slice(0,-1);
+
+  if(body.some(p=>p.x===head.x&&p.y===head.y)){
+    endGame();return;
+  }
+
+  snake.unshift(head);
+
+  if(eating){
+    score+=10;
+    level=Math.min(10,1+Math.floor(score/60));
+    spawnFood();
+    if(score>best){
+      best=score;
+      try{localStorage.setItem("snakeBest",best)}catch{}
+    }
+    updateStats();
+  }else{
+    snake.pop();
+  }
+}
+
+function rounded(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,r);
+  ctx.fill();
+}
+
+function draw(){
+  ctx.clearRect(0,0,600,600);
+  ctx.fillStyle="#080f1a";
+  ctx.fillRect(0,0,600,600);
+
+  ctx.strokeStyle="rgba(100,150,190,.09)";
+  for(let i=0;i<=size;i++){
+    ctx.beginPath();
+    ctx.moveTo(i*cell,0);ctx.lineTo(i*cell,600);
+    ctx.moveTo(0,i*cell);ctx.lineTo(600,i*cell);
+    ctx.stroke();
+  }
+
+  // الطعام المتوهج
+  ctx.save();
+  ctx.shadowColor="#ff5277";ctx.shadowBlur=22;
+  ctx.fillStyle="#ff5277";
+  ctx.beginPath();
+  ctx.arc(food.x*cell+cell/2,
+          food.y*cell+cell/2,cell*.31,0,Math.PI*2);
+  ctx.fill();ctx.restore();
+
+  // جسم الثعبان
+  snake.forEach((p,i)=>{
+    const pad=i===0?2:3;
+    const x=p.x*cell+pad,y=p.y*cell+pad;
+    const w=cell-pad*2;
+    ctx.save();
+    ctx.shadowColor="#35f2a1";
+    ctx.shadowBlur=i===0?18:7;
+    ctx.fillStyle=i===0?"#b2ffdc":"#22cb86";
+    rounded(x,y,w,w,5);
+    ctx.restore();
+
+    if(i===0){
+      ctx.fillStyle="#062219";
+      for(const side of [-1,1]){
+        const ex=x+w/2+dir.x*4-dir.y*side*4;
+        const ey=y+w/2+dir.y*4+dir.x*side*4;
+        ctx.beginPath();
+        ctx.arc(ex,ey,2.2,0,Math.PI*2);
+        ctx.fill();
+      }
+    }
+  });
+}
+
+function frame(now){
+  if(!running||paused)return;
+  acc+=Math.min(now-last,100);last=now;
+  const speed=Math.max(58,145-(level-1)*8);
+
+  while(acc>=speed&&running){
+    step();acc-=speed;
+  }
+
+  draw();
+  if(running)timer=requestAnimationFrame(frame);
+}
+
+function endGame(){
+  running=false;gameOver=true;
+  overlay("انتهت اللعبة!","نتيجتك: "+score+" نقطة","العب مجددًا ↻");
+}
+
+function togglePause(){
+  if(gameOver)return;
+  if(!running&&!paused)return;
+  paused=!paused;
+  if(paused){
+    running=false;
+    overlay("⏸ إيقاف مؤقت","اضغط متابعة عندما تكون مستعدًا","متابعة ▶");
+  }else{
+    startGame();
+  }
+}
+
+document.addEventListener("keydown",e=>{
+  const keys={
+    ArrowUp:"up",w:"up",ArrowDown:"down",s:"down",
+    ArrowLeft:"left",a:"left",ArrowRight:"right",d:"right"
+  };
+  if(keys[e.key]){
+    e.preventDefault();
+    setDirection(keys[e.key]);
+  }
+  if(e.code==="Space"){
+    e.preventDefault();togglePause();
+  }
+});
+
+document.querySelectorAll("[data-dir]").forEach(btn=>{
+  btn.addEventListener("pointerdown",e=>{
+    e.preventDefault();
+    setDirection(btn.dataset.dir);
+  });
+});
+
+$("start").onclick=()=>{
+  if(paused){paused=false;startGame();}
+  else startGame();
+};
+
+$("pause").onclick=togglePause;
+
+$("restart").onclick=()=>{
+  cancelAnimationFrame(timer);
+  running=false;reset();startGame();
+};
+
+// دعم السحب على الهاتف
+let sx=0,sy=0;
+canvas.addEventListener("touchstart",e=>{
+  sx=e.changedTouches[0].clientX;
+  sy=e.changedTouches[0].clientY;
+},{passive:true});
+
+canvas.addEventListener("touchend",e=>{
+  const t=e.changedTouches[0];
+  const dx=t.clientX-sx,dy=t.clientY-sy;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<15)return;
+  setDirection(Math.abs(dx)>Math.abs(dy)
+    ?(dx>0?"right":"left")
+    :(dy>0?"down":"up"));
+},{passive:true});
+
+reset();
+</script>
+</body>
+</html>
